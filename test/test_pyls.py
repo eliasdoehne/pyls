@@ -44,23 +44,56 @@ def setup_test_dirs(tmp_path_factory) -> pathlib.Path:
     return base_path
 
 
-@pytest.mark.parametrize("test_path", list(PATHS.keys()))
 @pytest.mark.parametrize("show_all", [False, True])
-def test_compare_to_system_ls(test_path: str,
-                              test_base_dir: pathlib.Path,
-                              show_all: bool):
-    path = test_base_dir / test_path
+@pytest.mark.parametrize("sort_by_size", [False])  # TODO
+@pytest.mark.parametrize("recursive", [False, True])
+@pytest.mark.parametrize("list_format", [False, True])
+@pytest.mark.parametrize("test_case", list(PATHS.keys()))
+def test_compare_to_system_ls(test_base_dir: pathlib.Path,
+                              test_case: str,
+                              sort_by_size: bool,
+                              show_all: bool,
+                              recursive: bool,
+                              list_format: bool):
+    """
+    Test the pyls implementation against the output of the system ls command.
+
+    :param test_base_dir: fixture for a base directory, defined above in setup_test_dirs
+    :param test_case: Identifier of the test case, i.e. its key in the PATHS dictionary.
+    :param show_all:
+    :param recursive:
+    :return:
+    """
+    path = test_base_dir / test_case
     assert path.exists()
 
-    subprocess_args = ["ls"]
+    subprocess_args = []
     if show_all:
         subprocess_args.append("-a")
+    if recursive:
+        subprocess_args.append("-R")
+    if list_format:
+        subprocess_args.append("-l")
+    if sort_by_size:
+        subprocess_args.append("-S")
     subprocess_args.append(path)
 
-    ls_run = subprocess.run(subprocess_args, capture_output=True)
+    ls_run = subprocess.run(["ls"] + subprocess_args, capture_output=True)
     sys_ls_result = ls_run.stdout.decode('utf-8')
 
-    pyls.CONFIG.paths = [path]
+    pyls.CONFIG.paths = [str(path)]
     pyls.CONFIG.show_all = show_all
+    pyls.CONFIG.recursive = recursive
+    pyls.CONFIG.list_format = list_format
+    pyls.CONFIG.sort_by_size = sort_by_size
+    py_ls_result = pyls.ls_string()
 
-    assert sys_ls_result == pyls.ls_string()
+    if sys_ls_result != py_ls_result:
+        print("\n==== EXPECTED ====")
+        print(sys_ls_result)
+        print("==================")
+        print("\n==== OBTAINED ====")
+        print(py_ls_result)
+        print("==================")
+
+    assert sys_ls_result == py_ls_result
