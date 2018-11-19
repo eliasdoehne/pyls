@@ -101,6 +101,8 @@ def main():
     CONFIG = get_configuration_from_command_line_args()
     for line in ls_lines():
         print(line)
+    # TODO: Return 1 or 2 if there was some error
+    return 0
 
 
 if __name__ == '__main__':

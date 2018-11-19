@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from pyls import pyls  # TODO fix this
+import pyls
 from .test_data import PATHS
 
 

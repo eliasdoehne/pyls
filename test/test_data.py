@@ -11,6 +11,7 @@ PATHS = dict(
         files=[(".foo", 0)],
     ),
     one_hidden_one_visible_file=dict(
+        # the leading dot should be ignored in the alphabetical ordering.
         files=[
             (".foo", 0),
             ("bar", 0),

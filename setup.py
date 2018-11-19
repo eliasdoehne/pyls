@@ -5,7 +5,7 @@ setup(
     install_requires=[],
     entry_points={
         "console_scripts": [
-            "pyls = pyls.pyls:main",
+            "pyls = pyls:main",
         ],
     },
 )
