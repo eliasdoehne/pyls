@@ -11,6 +11,29 @@ PATHS = dict(
     one_hidden_file=dict(
         files=[(".foo", 0)],
     ),
+    symlink=dict(
+        dirs=["foo"],
+        symlinks=[("link", "foo")],
+    ),
+    symlink_to_file=dict(
+        dirs=["foo"],
+        files=[("foo/a", 0)],
+        symlinks=[("link", "foo/a")],
+    ),
+    symlink_to_nested_subdir=dict(
+        dirs=[
+            "foo",
+            "foo/bar",
+        ],
+        symlinks=[("link", "foo/bar")],
+    ),
+    symlink_to_sibling_dir=dict(
+        dirs=[
+            "foo/bar1",
+            "foo/bar2",
+        ],
+        symlinks=[("foo/bar1/link", "foo/bar2")],
+    ),
     one_hidden_one_visible_file=dict(
         # the leading dot should be ignored in the alphabetical ordering.
         files=[

@@ -20,6 +20,12 @@ def _make_test_file(filepath: pathlib.Path, size_bytes=0):
     filepath.write_bytes(b"a" * size_bytes)
 
 
+def _make_test_symlink(path: pathlib.Path, target_path: pathlib.Path):
+    if os.path.exists(path):
+        raise ValueError(f"Abort: {path} already exists.")
+    path.symlink_to(target=target_path)
+
+
 @pytest.fixture(scope="session", name="test_base_dir")
 def setup_test_dirs(tmp_path_factory) -> pathlib.Path:
     """
@@ -34,6 +40,7 @@ def setup_test_dirs(tmp_path_factory) -> pathlib.Path:
     :return:
     """
     base_path = tmp_path_factory.mktemp("pyls_test_dir_")
+
     for test_case_name, dirs_files_dict in PATHS.items():
         test_path = base_path / test_case_name
         _make_test_path(test_path)
@@ -41,6 +48,9 @@ def setup_test_dirs(tmp_path_factory) -> pathlib.Path:
             _make_test_path(test_path / dir_path)
         for fname, size in dirs_files_dict.get("files", []):
             _make_test_file(test_path / fname, size_bytes=size)
+        for name, target in dirs_files_dict.get("symlinks", []):
+            _make_test_symlink(test_path / name, test_path / target)
+
     return base_path
 
 
@@ -101,6 +111,24 @@ def test_compare_to_system_ls(test_base_dir: pathlib.Path,
                             recursive=recursive,
                             show_all=show_all,
                             sort_by_size=sort_by_size)
+
+    print_if_different(py_ls_result, sys_ls_result)
+    assert sys_ls_result == py_ls_result
+
+
+@pytest.mark.skip  # these tests go to the current working directory and the file system root.
+@pytest.mark.parametrize("path", [".", "/"])
+@pytest.mark.parametrize("list_format", [False, True])
+@pytest.mark.parametrize("show_all", [False, True])
+def test_compare_to_system_ls_special_paths(path,
+                                            list_format,
+                                            show_all):
+    sys_ls_result = run_system_ls(path,
+                                  list_format=list_format,
+                                  show_all=show_all)
+    py_ls_result = run_pyls(path,
+                            list_format=list_format,
+                            show_all=show_all)
 
     print_if_different(py_ls_result, sys_ls_result)
     assert sys_ls_result == py_ls_result
