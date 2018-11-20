@@ -10,13 +10,14 @@ import sys
 from typing import List, Iterable, Tuple
 
 """ 
-The ls command seems to use a locale-specific sorting function, 
-resulting in sort orders such as e.g. ["a", ".b", "c"].
-In particular, the locale.LC_COLLATE parameter should be set 
-correctly.
+The ls command seems to use a locale-specific sorting function, resulting in sort orders such as e.g. ["a", ".b", "c"].
+In particular, the locale.LC_COLLATE parameter needs to be set correctly.
 
-The following line applies the user's locale, resulting in 
-the same sorting behaviour as the system ls command.
+The following line applies the user's locale, resulting in the same sorting behaviour as the system ls command.
+While this would not be a great idea in library code, pyls is meant to run as a standalone program. 
+
+For more information, refer to
+https://docs.python.org/3/library/locale.html#background-details-hints-tips-and-caveats
 """
 locale.setlocale(locale.LC_ALL, '')
 
@@ -114,6 +115,11 @@ def _get_list_row(base_path, p: pathlib.Path) -> Tuple[str, str, str, str, str, 
     size_bytes = str(lstat.st_size)
     last_modified = _last_modified_time_str(lstat)
     name = _path_name(base_path, p)
+
+    if p.is_symlink():
+        resolved = p.resolve()
+        name = f"{name} -> {resolved}"
+
     return filemode, num_links_dirs, user, group, size_bytes, last_modified, name
 
 
@@ -163,9 +169,11 @@ def _iter_dir_by_name(path: pathlib.Path) -> Iterable[pathlib.Path]:
 
 def _populate_stack_for_recursive_ls(base_path: pathlib.Path,
                                      queue: List[pathlib.Path]):
+    if base_path.is_symlink():
+        return
     children = sorted(base_path.iterdir(), key=_sort_key, reverse=True)
     for c in children:
-        if c.is_dir():
+        if c.is_dir() and not c.is_symlink():
             queue.append(c)
 
 
