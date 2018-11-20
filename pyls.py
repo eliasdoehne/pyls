@@ -146,15 +146,27 @@ def _dir_lines_in_list_format(base_path: pathlib.Path,
     """
     rows = [_get_list_row(base_path, p) for p in paths]
     # All columns except the path should be right-aligned
-    # TODO: user and group columns should be left-aligned, but with padding
+
     col_widths = None
     if rows:
         col_widths = [max(len(r[col_idx]) for r in rows) for col_idx in range(6)]
+        col_widths.append(0)
+
+    left_align = lambda s, w: s.ljust(w)
+    right_align = lambda s, w: s.rjust(w)
+    no_align = lambda s, w: s
+
+    alignments = [
+        no_align,  # filemode
+        right_align,  # num links
+        left_align,  # user
+        left_align,  # group
+        right_align,  # size_bytes
+        left_align,  # last modified
+        no_align,  # name
+    ]
     for row in rows:
-        yield "{} {} {} {} {} {} {}".format(*(
-            val.rjust(col_widths[i]) if i < 6 else val
-            for (i, val) in enumerate(row)
-        ))
+        yield " ".join(align(val, col_width) for (val, col_width, align) in zip(row, col_widths, alignments))
 
 
 def _get_list_row(base_path: pathlib.Path,
