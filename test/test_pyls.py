@@ -89,7 +89,7 @@ def run_pyls(path, list_format=False, recursive=False, show_all=False, sort_by_s
 
 @pytest.mark.parametrize("show_all", [False, True])
 @pytest.mark.parametrize("relative_path", [False, True])
-@pytest.mark.parametrize("sort_by_size", [False])  # TODO
+@pytest.mark.parametrize("sort_by_size", [False, True])
 @pytest.mark.parametrize("recursive", [False, True])
 @pytest.mark.parametrize("list_format", [False, True])
 @pytest.mark.parametrize("test_case", list(PATHS.keys()))
@@ -154,6 +154,8 @@ def test_compare_to_system_ls_special_paths(path,
 
 def print_if_different(py_ls_result, sys_ls_result):
     if sys_ls_result != py_ls_result:
+        print("\n==== CONFIG ====")
+        print(pyls.CONFIG)
         print("\n==== EXPECTED ====")
         print(sys_ls_result)
         print("==================")

@@ -7,7 +7,7 @@ import pathlib
 import pwd
 import stat
 import sys
-from typing import List, Iterable, Tuple
+from typing import List, Iterable, Tuple, Any
 
 """ 
 The ls command seems to use a locale-specific sorting function, resulting in sort orders such as e.g. ["a", ".b", "c"].
@@ -48,7 +48,7 @@ def ls_lines() -> Iterable[str]:
 
     # Traverse the directory structure.
     stack = sorted((pathlib.Path(p) for p in CONFIG.paths),
-                   key=_sort_key, reverse=True)
+                   key=sort_key, reverse=True)
     while stack:
         base_path = stack.pop()
         if list_multiple_dirs:
@@ -88,7 +88,8 @@ def _total_blocks(paths: List[pathlib.Path]):
     return blocks // 2
 
 
-def _lines_in_list_format(base_path, paths):
+def _lines_in_list_format(base_path: pathlib.Path,
+                          paths: List[pathlib.Path]):
     rows = [_get_list_row(base_path, p) for p in paths]
     # All columns except the last should be right-aligned
     col_widths = None
@@ -101,8 +102,9 @@ def _lines_in_list_format(base_path, paths):
         ))
 
 
-def _get_list_row(base_path, p: pathlib.Path) -> Tuple[str, str, str, str, str, str, str]:
-    lstat = pathlib.Path(p).lstat()
+def _get_list_row(base_path: pathlib.Path,
+                  p: pathlib.Path) -> Tuple[str, str, str, str, str, str, str]:
+    lstat = p.lstat()
 
     filemode = stat.filemode(lstat.st_mode)
     num_links_dirs = str(lstat[stat.ST_NLINK])
@@ -117,8 +119,7 @@ def _get_list_row(base_path, p: pathlib.Path) -> Tuple[str, str, str, str, str, 
     name = _path_name(base_path, p)
 
     if p.is_symlink():
-        resolved = p.resolve()
-        name = f"{name} -> {resolved}"
+        name = f"{name} -> {p.resolve()}"
 
     return filemode, num_links_dirs, user, group, size_bytes, last_modified, name
 
@@ -145,23 +146,17 @@ def _last_modified_time_str(lstat) -> str:
     return last_modified.strftime(date_format)
 
 
-def _iter_single_dir(path) -> Iterable[pathlib.Path]:
-    if CONFIG.sort_by_size:
-        yield from _iter_dir_by_size(path)
-    else:
-        yield from _iter_dir_by_name(path)
-
-
-def _iter_dir_by_size(path: pathlib.Path) -> Iterable[pathlib.Path]:
-    raise NotImplementedError("TODO")
-
-
-def _iter_dir_by_name(path: pathlib.Path) -> Iterable[pathlib.Path]:
+def _iter_single_dir(path: pathlib.Path) -> Iterable[pathlib.Path]:
     children = list(path.iterdir())
     if CONFIG.show_all:
-        children.append(path)
-        children.append(path / "..")
-    for p in sorted(children, key=_sort_key):
+        # handle . and .. correctly
+        if CONFIG.sort_by_size:
+            children.append(path)
+            children.append(path / "..")
+        else:
+            yield path
+            yield path / ".."
+    for p in sorted(children, key=sort_key):
         if not CONFIG.show_all and p.name[0] == '.':
             continue
         yield p
@@ -171,14 +166,20 @@ def _populate_stack_for_recursive_ls(base_path: pathlib.Path,
                                      queue: List[pathlib.Path]):
     if base_path.is_symlink():
         return
-    children = sorted(base_path.iterdir(), key=_sort_key, reverse=True)
+    children = sorted(base_path.iterdir(), key=sort_key, reverse=True)
     for c in children:
         if c.is_dir() and not c.is_symlink():
             queue.append(c)
 
 
-def _sort_key(path: pathlib.Path) -> str:
-    return locale.strxfrm(str(path))
+def sort_key(path: pathlib.Path) -> Any:
+    if CONFIG.sort_by_size:
+        # return tuple with name to resolve ties.
+        # return negative size, as largest files should be printed first
+        return (-path.lstat().st_size,
+                locale.strxfrm(str(path)))
+    else:
+        return locale.strxfrm(str(path))
 
 
 def get_configuration_from_command_line_args() -> Config:
