@@ -1,3 +1,4 @@
+import contextlib
 import os
 import pathlib
 import subprocess
@@ -6,6 +7,14 @@ import pytest
 
 import pyls
 from .test_data import PATHS
+
+
+@contextlib.contextmanager
+def ch_dir_context(target: pathlib.Path):
+    cwd = pathlib.Path.cwd()
+    os.chdir(target)
+    yield
+    os.chdir(cwd)
 
 
 def _make_test_path(path: pathlib.Path):
@@ -79,6 +88,7 @@ def run_pyls(path, list_format=False, recursive=False, show_all=False, sort_by_s
 
 
 @pytest.mark.parametrize("show_all", [False, True])
+@pytest.mark.parametrize("relative_path", [False, True])
 @pytest.mark.parametrize("sort_by_size", [False])  # TODO
 @pytest.mark.parametrize("recursive", [False, True])
 @pytest.mark.parametrize("list_format", [False, True])
@@ -87,6 +97,7 @@ def test_compare_to_system_ls(test_base_dir: pathlib.Path,
                               test_case: str,
                               sort_by_size: bool,
                               show_all: bool,
+                              relative_path: bool,
                               recursive: bool,
                               list_format: bool):
     """
@@ -98,22 +109,29 @@ def test_compare_to_system_ls(test_base_dir: pathlib.Path,
     :param recursive:
     :return:
     """
-    path = test_base_dir / test_case
-    assert path.exists()
+    if relative_path:
+        working_directory = test_base_dir
+        path = test_case
+    else:
+        working_directory = pathlib.Path.cwd()
+        path = test_base_dir / test_case
 
-    sys_ls_result = run_system_ls(path,
-                                  list_format=list_format,
-                                  recursive=recursive,
-                                  show_all=show_all,
-                                  sort_by_size=sort_by_size)
-    py_ls_result = run_pyls(path,
-                            list_format=list_format,
-                            recursive=recursive,
-                            show_all=show_all,
-                            sort_by_size=sort_by_size)
+    assert working_directory.exists()
 
-    print_if_different(py_ls_result, sys_ls_result)
-    assert sys_ls_result == py_ls_result
+    with ch_dir_context(working_directory):
+        sys_ls_result = run_system_ls(path,
+                                      list_format=list_format,
+                                      recursive=recursive,
+                                      show_all=show_all,
+                                      sort_by_size=sort_by_size)
+        py_ls_result = run_pyls(path,
+                                list_format=list_format,
+                                recursive=recursive,
+                                show_all=show_all,
+                                sort_by_size=sort_by_size)
+
+        print_if_different(py_ls_result, sys_ls_result)
+        assert sys_ls_result == py_ls_result
 
 
 @pytest.mark.skip  # these tests go to the current working directory and the file system root.
