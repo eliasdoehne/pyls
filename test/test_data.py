@@ -79,4 +79,26 @@ PATHS = dict(
             ("foo02/bar02/c.txt", 0),
         ],
     ),
+    file_names_starting_with_symbols=dict(
+        files=[
+            # the correct order for these seems to be:
+            #   1. File names with alphanumeric characters are sorted as though the alphanumerics
+            ("a1", 0),
+            ("_a2", 0),
+            ("a_2", 0),
+            ("......", 0),
+            ("..a3", 0),
+            ("a3", 0),
+            ("a_3", 0),
+            ("__a4", 0),
+            # repeat with dot prefix to check that they are sorted correctly with the -a option
+            (".a1", 0),
+            ("._a2", 0),
+            (".......", 0),
+            ("...a3", 0),
+            (".a3", 0),
+            (".a_3", 0),
+            (".__a4", 0),
+        ],
+    ),
 )
