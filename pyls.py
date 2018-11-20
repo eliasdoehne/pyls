@@ -10,13 +10,12 @@ import sys
 from typing import List, Iterable, Tuple, Any
 
 """ 
-The ls command seems to use a locale-specific sorting function, resulting in sort orders such as e.g. ["a", ".b", "c"].
-In particular, the locale.LC_COLLATE parameter needs to be set correctly.
+The ls command uses a locale-specific string sorting function, resulting in sort orders such as e.g. ["a", ".b", "c"],
+while the order obtained by the default sort would be [".b", "a", "c"]. To achieve the same result, we can configure 
+python to use the user's locale and use the locale.strxfrm as the sorting key.
 
-The following line applies the user's locale, resulting in the same sorting behaviour as the system ls command.
-While this would not be a great idea in library code, pyls is meant to run as a standalone program. 
-
-For more information, refer to
+The following line applies the user's locale. While this is not a great idea in library code, pyls is meant to run as a 
+standalone program, so this should be OK. For more information, refer to
 https://docs.python.org/3/library/locale.html#background-details-hints-tips-and-caveats
 """
 locale.setlocale(locale.LC_ALL, '')
@@ -24,6 +23,7 @@ locale.setlocale(locale.LC_ALL, '')
 
 @dataclasses.dataclass()
 class Config:
+    """ This class stores the parameters with which pyls was invoked. """
     list_format: bool = False
     show_all: bool = False
     sort_by_size: bool = False
@@ -34,7 +34,50 @@ class Config:
 CONFIG = Config()
 
 
+def get_configuration_from_command_line_args() -> Config:
+    """ Parse the command line args and convert them to a Config object. """
+    parser = argparse.ArgumentParser(description='A Python implementation of the UNIX ls command.')
+    parser.add_argument('paths', nargs='*', default=['.'])
+    parser.add_argument('-l', action='store_true')
+    parser.add_argument('-a', action='store_true')
+    parser.add_argument('-S', action='store_true')
+    parser.add_argument('-R', action='store_true')
+    args = parser.parse_args()
+    return Config(
+        list_format=args.l,
+        show_all=args.a,
+        sort_by_size=args.S,
+        recursive=args.R,
+        paths=args.paths,
+    )
+
+
+def main():
+    """
+    This is the main entry point for the pyls command. The results are printed to stdout.
+
+    Exit codes are set as described in the ls command man page:
+        "0 if OK,
+        1 if minor problems (e.g., cannot access subdirectory),
+        2 if serious trouble (e.g., cannot access command-line argument)."
+
+    :return:
+    """
+    global CONFIG
+    CONFIG = get_configuration_from_command_line_args()
+    try:
+        for line in ls_lines():
+            print(line)
+    except (FileNotFoundError, PermissionError) as e:
+        print(e)
+        sys.exit(1)
+    except Exception as e:
+        print(e)
+        sys.exit(2)
+
+
 def ls_string() -> str:
+    """ Collect the pyls output to a single string. Mostly used for testing. """
     joined_lines = "\n".join(ls_lines())
     if joined_lines:  # only add trailing newline to non-empty output
         joined_lines += "\n"
@@ -42,7 +85,9 @@ def ls_string() -> str:
 
 
 def ls_lines() -> Iterable[str]:
-    # Keep two flags to determine if we need to add path headers and leading newlines:
+    """ Iterate over the pyls output line by line. """
+
+    # Use two flags to determine if we need to add path headers and leading newlines, see other comment below:
     list_multiple_dirs = (len(CONFIG.paths) > 1) or CONFIG.recursive
     is_first_dir = True
 
@@ -51,34 +96,40 @@ def ls_lines() -> Iterable[str]:
                    key=sort_key, reverse=True)
     while stack:
         base_path = stack.pop()
+
+        """ In recursive mode or if multiple path arguments are given, we first print a header indicating the current 
+        directory. This header should have a leading newline, unless it is the first line of the output. Since this 
+        requires some awareness of the outer loop, we return the header line here, rather than in
+        format_lines_single_dir function. """
+
         if list_multiple_dirs:
             newline = "" if is_first_dir else "\n"
             yield f"{newline}{base_path}:"
             is_first_dir = False
 
-        yield from make_lines(base_path)
+        yield from format_lines_single_dir(base_path)
 
         if CONFIG.recursive:
-            _populate_stack_for_recursive_ls(base_path, stack)
+            _populate_stack_for_recursive_execution(base_path, stack)
 
 
-def make_lines(base_path: pathlib.Path) -> Iterable[str]:
+def format_lines_single_dir(base_path: pathlib.Path) -> Iterable[str]:
     """
-    Convert the pathlib.Path instances to formatted lines.
-
-    :return:
+    Format the lines for the output based on the provided pathlib.Path instances. This does not include the path
+    headers ("/some/path:") in recursive mode or when executing pyls with multiple path arguments.
     """
     paths = _iter_single_dir(base_path)
     if CONFIG.list_format:
-        paths = list(paths)  # need to iterate twice to calculate block count
-        yield f"total {_total_blocks(paths)}"
-        yield from _lines_in_list_format(base_path, paths)
+        paths = list(paths)  # need to iterate twice to calculate block count & format the output
+        yield f"total {_total_num_blocks(paths)}"
+        yield from _dir_lines_in_list_format(base_path, paths)
     else:
         for p in paths:
             yield _path_name(base_path, p)
 
 
-def _total_blocks(paths: List[pathlib.Path]):
+def _total_num_blocks(paths: List[pathlib.Path]) -> int:
+    """ Calculates the total number of blocks allocated for the paths. """
     blocks = 0
     for p in paths:
         blocks += p.lstat().st_blocks
@@ -88,10 +139,14 @@ def _total_blocks(paths: List[pathlib.Path]):
     return blocks // 2
 
 
-def _lines_in_list_format(base_path: pathlib.Path,
-                          paths: List[pathlib.Path]):
+def _dir_lines_in_list_format(base_path: pathlib.Path,
+                              paths: List[pathlib.Path]) -> Iterable[str]:
+    """
+    Iterate over the formatted rows corresponding to the paths in the long list format.
+    """
     rows = [_get_list_row(base_path, p) for p in paths]
-    # All columns except the last should be right-aligned
+    # All columns except the path should be right-aligned
+    # TODO: user and group columns should be left-aligned, but with padding
     col_widths = None
     if rows:
         col_widths = [max(len(r[col_idx]) for r in rows) for col_idx in range(6)]
@@ -104,6 +159,7 @@ def _lines_in_list_format(base_path: pathlib.Path,
 
 def _get_list_row(base_path: pathlib.Path,
                   p: pathlib.Path) -> Tuple[str, str, str, str, str, str, str]:
+    """ Collect all items required to print a row in the long list format to a single tuple. """
     lstat = p.lstat()
 
     filemode = stat.filemode(lstat.st_mode)
@@ -125,7 +181,9 @@ def _get_list_row(base_path: pathlib.Path,
 
 
 def _path_name(base_path: pathlib.Path, p: pathlib.Path) -> str:
+    """ Converts the path object to the name that should be shown in the ls output. """
     name = p.name
+    # The main reason for this function is the formatting of the . and .. dirs:
     if p == base_path:
         name = "."
     elif p == base_path.parent:
@@ -134,10 +192,13 @@ def _path_name(base_path: pathlib.Path, p: pathlib.Path) -> str:
 
 
 def _last_modified_time_str(lstat) -> str:
+    """
+    Convert the stat object to the string representing the time of the last modification.
+    For files modified within the past 6 months, a date format indicating the day, month and daytime is used.
+    For files older than 6 months, a different date format indicating the day, month and year is used.
+    """
     last_modified = datetime.datetime.fromtimestamp(lstat.st_mtime)
-    # For files older than 6 months, a different date format is used.
-    # The constant 31556952 is used in the ls source code, available at
-    # http://ftp.gnu.org/gnu/coreutils/
+    # The constant 31556952 is used in the ls source code, available at http://ftp.gnu.org/gnu/coreutils/.
     # It roughly represents the number of seconds in a Gregorian year.
     if (datetime.datetime.now() - last_modified) < datetime.timedelta(seconds=31556952 // 2):
         date_format = "%b %e %H:%M"
@@ -147,13 +208,23 @@ def _last_modified_time_str(lstat) -> str:
 
 
 def _iter_single_dir(path: pathlib.Path) -> Iterable[pathlib.Path]:
+    """
+    Iterate over the contents over a single dir in sorted order. Compared to calling pathlib.Path.iterdir(), this
+    function:
+      1. Returns the paths in sorted order depending on the CONFIG.sort_by_size parameter
+      2. Inserts the special paths . and .., which are not included in pathlib.Path.iterdir
+
+    :param path:
+    :return:
+    """
     children = list(path.iterdir())
     if CONFIG.show_all:
-        # handle . and .. correctly
         if CONFIG.sort_by_size:
+            # In size-sorted output, . and .. are sorted together with the other paths
             children.append(path)
             children.append(path / "..")
         else:
+            # In name-sorted output, . and .. should always be yielded first
             yield path
             yield path / ".."
     for p in sorted(children, key=sort_key):
@@ -162,57 +233,29 @@ def _iter_single_dir(path: pathlib.Path) -> Iterable[pathlib.Path]:
         yield p
 
 
-def _populate_stack_for_recursive_ls(base_path: pathlib.Path,
-                                     queue: List[pathlib.Path]):
+def _populate_stack_for_recursive_execution(base_path: pathlib.Path,
+                                            stack: List[pathlib.Path]):
     if base_path.is_symlink():
-        return
+        return  # don't enter symlinks
     children = sorted(base_path.iterdir(), key=sort_key, reverse=True)
     for c in children:
         if c.is_dir() and not c.is_symlink():
-            queue.append(c)
+            stack.append(c)
 
 
 def sort_key(path: pathlib.Path) -> Any:
+    """
+    The sorting key used throughout the program. Depending on the CONFIG.sort_by_size parameter, the key is a string
+    representing the path name, or a tuple of an integer containing the negative size of the path and the name key in
+    order to resolve ties.
+    """
     if CONFIG.sort_by_size:
-        # return tuple with name to resolve ties.
-        # return negative size, as largest files should be printed first
+        # use the negative size, as largest files should be printed first
+        # make a tuple with the name key as the second element to resolve ties.
         return (-path.lstat().st_size,
                 locale.strxfrm(str(path)))
     else:
         return locale.strxfrm(str(path))
-
-
-def get_configuration_from_command_line_args() -> Config:
-    parser = argparse.ArgumentParser(description='A Python implementation of the UNIX ls command.')
-    parser.add_argument('paths', nargs='*', default=['.'])
-    parser.add_argument('-l', action='store_true')
-    parser.add_argument('-a', action='store_true')
-    parser.add_argument('-S', action='store_true')
-    parser.add_argument('-R', action='store_true')
-    args = parser.parse_args()
-    return Config(
-        list_format=args.l,
-        show_all=args.a,
-        sort_by_size=args.S,
-        recursive=args.R,
-        paths=args.paths,
-    )
-
-
-def main():
-    global CONFIG
-    CONFIG = get_configuration_from_command_line_args()
-    try:
-        for line in ls_lines():
-            print(line)
-    except FileNotFoundError as e:
-        # 1 if minor problems (e.g., cannot access subdirectory),
-        print(e)
-        sys.exit(1)
-    except Exception as e:
-        # 2 if serious trouble (e.g., cannot access command-line argument).
-        print(e)
-        sys.exit(2)
 
 
 if __name__ == '__main__':
