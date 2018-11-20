@@ -2,11 +2,23 @@ import argparse
 import dataclasses
 import datetime
 import grp
+import locale
 import pathlib
 import pwd
 import stat
 import sys
-from typing import List, Iterable, Union, Tuple
+from typing import List, Iterable, Tuple
+
+""" 
+The ls command seems to use a locale-specific sorting function, 
+resulting in sort orders such as e.g. ["a", ".b", "c"].
+In particular, the locale.LC_COLLATE parameter should be set 
+correctly.
+
+The following line applies the user's locale, resulting in 
+the same sorting behaviour as the system ls command.
+"""
+locale.setlocale(locale.LC_ALL, '')
 
 
 @dataclasses.dataclass()
@@ -34,10 +46,10 @@ def ls_lines() -> Iterable[str]:
     is_first_dir = True
 
     # Traverse the directory structure.
-    q = sorted((pathlib.Path(p) for p in CONFIG.paths),
-               key=_sort_key, reverse=True)
-    while q:
-        base_path = q.pop()
+    stack = sorted((pathlib.Path(p) for p in CONFIG.paths),
+                   key=_sort_key, reverse=True)
+    while stack:
+        base_path = stack.pop()
         if list_multiple_dirs:
             newline = "" if is_first_dir else "\n"
             yield f"{newline}{base_path}:"
@@ -46,7 +58,7 @@ def ls_lines() -> Iterable[str]:
         yield from make_lines(base_path)
 
         if CONFIG.recursive:
-            _populate_queue_for_recursive_option(base_path, q)
+            _populate_stack_for_recursive_ls(base_path, stack)
 
 
 def make_lines(base_path: pathlib.Path) -> Iterable[str]:
@@ -139,29 +151,26 @@ def _iter_dir_by_size(path: pathlib.Path) -> Iterable[pathlib.Path]:
 
 
 def _iter_dir_by_name(path: pathlib.Path) -> Iterable[pathlib.Path]:
+    children = list(path.iterdir())
     if CONFIG.show_all:
-        yield path
-        yield path.parent
-    for p in sorted(path.iterdir(), key=_sort_key):
+        children.append(path)
+        children.append(path / "..")
+    for p in sorted(children, key=_sort_key):
         if not CONFIG.show_all and p.name[0] == '.':
             continue
         yield p
 
 
-def _populate_queue_for_recursive_option(base_path: pathlib.Path,
-                                         queue: List[pathlib.Path]):
-    children = sorted(base_path.iterdir(), key=_sort_key)
-    while children:
-        c = children.pop()
+def _populate_stack_for_recursive_ls(base_path: pathlib.Path,
+                                     queue: List[pathlib.Path]):
+    children = sorted(base_path.iterdir(), key=_sort_key, reverse=True)
+    for c in children:
         if c.is_dir():
             queue.append(c)
 
 
 def _sort_key(path: pathlib.Path) -> str:
-    key = path.name.lower()
-    if key[0] == '.':
-        return key[1:]
-    return key
+    return locale.strxfrm(str(path))
 
 
 def get_configuration_from_command_line_args() -> Config:
