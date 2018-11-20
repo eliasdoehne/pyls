@@ -44,6 +44,30 @@ def setup_test_dirs(tmp_path_factory) -> pathlib.Path:
     return base_path
 
 
+def run_system_ls(path, list_format=False, recursive=False, show_all=False, sort_by_size=False):
+    subprocess_args = []
+    if show_all:
+        subprocess_args.append("-a")
+    if recursive:
+        subprocess_args.append("-R")
+    if list_format:
+        subprocess_args.append("-l")
+    if sort_by_size:
+        subprocess_args.append("-S")
+    subprocess_args.append(path)
+    ls_run = subprocess.run(["ls"] + subprocess_args, capture_output=True)
+    return ls_run.stdout.decode('utf-8')
+
+
+def run_pyls(path, list_format=False, recursive=False, show_all=False, sort_by_size=False):
+    pyls.CONFIG.paths = [str(path)]
+    pyls.CONFIG.show_all = show_all
+    pyls.CONFIG.recursive = recursive
+    pyls.CONFIG.list_format = list_format
+    pyls.CONFIG.sort_by_size = sort_by_size
+    return pyls.ls_string()
+
+
 @pytest.mark.parametrize("show_all", [False, True])
 @pytest.mark.parametrize("sort_by_size", [False])  # TODO
 @pytest.mark.parametrize("recursive", [False, True])
@@ -67,27 +91,22 @@ def test_compare_to_system_ls(test_base_dir: pathlib.Path,
     path = test_base_dir / test_case
     assert path.exists()
 
-    subprocess_args = []
-    if show_all:
-        subprocess_args.append("-a")
-    if recursive:
-        subprocess_args.append("-R")
-    if list_format:
-        subprocess_args.append("-l")
-    if sort_by_size:
-        subprocess_args.append("-S")
-    subprocess_args.append(path)
+    sys_ls_result = run_system_ls(path,
+                                  list_format=list_format,
+                                  recursive=recursive,
+                                  show_all=show_all,
+                                  sort_by_size=sort_by_size)
+    py_ls_result = run_pyls(path,
+                            list_format=list_format,
+                            recursive=recursive,
+                            show_all=show_all,
+                            sort_by_size=sort_by_size)
 
-    ls_run = subprocess.run(["ls"] + subprocess_args, capture_output=True)
-    sys_ls_result = ls_run.stdout.decode('utf-8')
+    print_if_different(py_ls_result, sys_ls_result)
+    assert sys_ls_result == py_ls_result
 
-    pyls.CONFIG.paths = [str(path)]
-    pyls.CONFIG.show_all = show_all
-    pyls.CONFIG.recursive = recursive
-    pyls.CONFIG.list_format = list_format
-    pyls.CONFIG.sort_by_size = sort_by_size
-    py_ls_result = pyls.ls_string()
 
+def print_if_different(py_ls_result, sys_ls_result):
     if sys_ls_result != py_ls_result:
         print("\n==== EXPECTED ====")
         print(sys_ls_result)
@@ -95,5 +114,3 @@ def test_compare_to_system_ls(test_base_dir: pathlib.Path,
         print("\n==== OBTAINED ====")
         print(py_ls_result)
         print("==================")
-
-    assert sys_ls_result == py_ls_result
