@@ -34,24 +34,6 @@ class Config:
 CONFIG = Config()
 
 
-def get_configuration_from_command_line_args() -> Config:
-    """ Parse the command line args and convert them to a Config object. """
-    parser = argparse.ArgumentParser(description='A Python implementation of the UNIX ls command.')
-    parser.add_argument('paths', nargs='*', default=['.'])
-    parser.add_argument('-l', action='store_true')
-    parser.add_argument('-a', action='store_true')
-    parser.add_argument('-S', action='store_true')
-    parser.add_argument('-R', action='store_true')
-    args = parser.parse_args()
-    return Config(
-        list_format=args.l,
-        show_all=args.a,
-        sort_by_size=args.S,
-        recursive=args.R,
-        paths=args.paths,
-    )
-
-
 def main():
     """
     This is the main entry point for the pyls command. The results are printed to stdout.
@@ -72,6 +54,25 @@ def main():
     except Exception as e:
         print(e)
         sys.exit(2)
+    sys.exit(0)
+
+
+def get_configuration_from_command_line_args() -> Config:
+    """ Parse the command line args and convert them to a Config object. """
+    parser = argparse.ArgumentParser(description='A Python implementation of the UNIX ls command.')
+    parser.add_argument('paths', nargs='*', default=['.'])
+    parser.add_argument('-l', action='store_true')
+    parser.add_argument('-a', action='store_true')
+    parser.add_argument('-S', action='store_true')
+    parser.add_argument('-R', action='store_true')
+    args = parser.parse_args()
+    return Config(
+        list_format=args.l,
+        show_all=args.a,
+        sort_by_size=args.S,
+        recursive=args.R,
+        paths=args.paths,
+    )
 
 
 def ls_string() -> str:
@@ -91,7 +92,7 @@ def ls_lines() -> Iterable[str]:
 
     # Traverse the directory structure.
     stack = sorted((pathlib.Path(p) for p in CONFIG.paths),
-                   key=sort_key, reverse=True)
+                   key=_sort_key, reverse=True)
     while stack:
         base_path = stack.pop()
 
@@ -116,14 +117,14 @@ def format_lines_single_dir(base_path: pathlib.Path) -> Iterable[str]:
     Format the lines for the output based on the provided pathlib.Path instances. This does not include the path
     headers ("/some/path:") in recursive mode or when executing pyls with multiple path arguments.
     """
-    paths = _iter_single_dir(base_path)
+    paths = _iter_single_dir_children(base_path)
     if CONFIG.list_format:
         paths = list(paths)  # need to iterate twice to calculate block count & format the output
         yield f"total {_total_num_blocks(paths)}"
-        yield from _dir_lines_in_list_format(base_path, paths)
+        yield from _lines_of_single_dir_content_in_list_format(base_path, paths)
     else:
         for p in paths:
-            yield _path_name(base_path, p)
+            yield _printable_path_name(base_path, p)
 
 
 def _total_num_blocks(paths: List[pathlib.Path]) -> int:
@@ -137,13 +138,12 @@ def _total_num_blocks(paths: List[pathlib.Path]) -> int:
     return blocks // 2
 
 
-def _dir_lines_in_list_format(base_path: pathlib.Path,
-                              paths: List[pathlib.Path]) -> Iterable[str]:
+def _lines_of_single_dir_content_in_list_format(base_path: pathlib.Path,
+                                                paths: List[pathlib.Path]) -> Iterable[str]:
     """
-    Iterate over the formatted rows corresponding to the paths in the long list format.
+    Iterate over the formatted rows corresponding to the contents of a single directory in long list format.
     """
-    rows = [_get_list_row(base_path, p) for p in paths]
-    # All columns except the path should be right-aligned
+    rows = [_single_row_data_in_list_format(base_path, p) for p in paths]
 
     col_widths = None
     if rows:
@@ -163,12 +163,13 @@ def _dir_lines_in_list_format(base_path: pathlib.Path,
         left_align,  # last modified
         no_align,  # name
     ]
+
     for row in rows:
         yield " ".join(align(val, col_width) for (val, col_width, align) in zip(row, col_widths, alignments))
 
 
-def _get_list_row(base_path: pathlib.Path,
-                  p: pathlib.Path) -> Tuple[str, str, str, str, str, str, str]:
+def _single_row_data_in_list_format(base_path: pathlib.Path,
+                                    p: pathlib.Path) -> Tuple[str, str, str, str, str, str, str]:
     """ Collect all items required to print a row in the long list format to a single tuple. """
     lstat = p.lstat()
 
@@ -182,7 +183,7 @@ def _get_list_row(base_path: pathlib.Path,
 
     size_bytes = str(lstat.st_size)
     last_modified = _last_modified_time_str(lstat)
-    name = _path_name(base_path, p)
+    name = _printable_path_name(base_path, p)
 
     if p.is_symlink():
         name = f"{name} -> {p.resolve()}"
@@ -190,8 +191,11 @@ def _get_list_row(base_path: pathlib.Path,
     return filemode, num_links_dirs, user, group, size_bytes, last_modified, name
 
 
-def _path_name(base_path: pathlib.Path, p: pathlib.Path) -> str:
-    """ Converts the path object to the name that should be shown in the ls output. """
+def _printable_path_name(base_path: pathlib.Path, p: pathlib.Path) -> str:
+    """
+    Converts the path object to the name that should be shown in the ls output. The base_path is required to check
+    for the special directories . and ..
+    """
     name = p.name
     # The main reason for this function is the formatting of the . and .. dirs:
     if p == base_path:
@@ -203,29 +207,30 @@ def _path_name(base_path: pathlib.Path, p: pathlib.Path) -> str:
 
 def _last_modified_time_str(lstat) -> str:
     """
-    Convert the stat object to the string representing the time of the last modification.
+    Get the string representing the time of the last modification.
+
     For files modified within the past 6 months, a date format indicating the day, month and daytime is used.
     For files older than 6 months, a different date format indicating the day, month and year is used.
     """
     last_modified = datetime.datetime.fromtimestamp(lstat.st_mtime)
     # The constant 31556952 is used in the ls source code, available at http://ftp.gnu.org/gnu/coreutils/.
     # It roughly represents the number of seconds in a Gregorian year.
-    if (datetime.datetime.now() - last_modified) < datetime.timedelta(seconds=31556952 // 2):
+    six_months_in_seconds = 31556952 // 2
+    if (datetime.datetime.now() - last_modified) < datetime.timedelta(seconds=six_months_in_seconds):
         date_format = "%b %e %H:%M"
     else:
         date_format = "%b %e  %Y"
     return last_modified.strftime(date_format)
 
 
-def _iter_single_dir(path: pathlib.Path) -> Iterable[pathlib.Path]:
+def _iter_single_dir_children(path: pathlib.Path) -> Iterable[pathlib.Path]:
     """
-    Iterate over the contents over a single dir in sorted order. Compared to calling pathlib.Path.iterdir(), this
-    function:
-      1. Returns the paths in sorted order depending on the CONFIG.sort_by_size parameter
-      2. Inserts the special paths . and .., which are not included in pathlib.Path.iterdir
+    Iterate over the children of a directory in sorted order.
 
-    :param path:
-    :return:
+    Compared to calling path.iterdir(), this function:
+
+      1. Returns the paths in sorted order depending on the CONFIG.sort_by_size parameter
+      2. Includes the special paths . and .., which are not returned by pathlib.Path.iterdir
     """
     children = list(path.iterdir())
     if CONFIG.show_all:
@@ -237,7 +242,7 @@ def _iter_single_dir(path: pathlib.Path) -> Iterable[pathlib.Path]:
             # In name-sorted output, . and .. should always be yielded first
             yield path
             yield path / ".."
-    for p in sorted(children, key=sort_key):
+    for p in sorted(children, key=_sort_key):
         if _is_hidden_path(p):
             continue
         yield p
@@ -249,7 +254,7 @@ def _populate_stack_for_recursive_execution(base_path: pathlib.Path,
         return  # don't enter symlinks
     if _is_hidden_path(base_path):
         return
-    children = sorted(base_path.iterdir(), key=sort_key, reverse=True)
+    children = sorted(base_path.iterdir(), key=_sort_key, reverse=True)
     for c in children:
         if _is_hidden_path(c):
             continue
@@ -262,7 +267,7 @@ def _is_hidden_path(p: pathlib.Path) -> bool:
     return not CONFIG.show_all and p.name.startswith(".")
 
 
-def sort_key(path: pathlib.Path) -> Any:
+def _sort_key(path: pathlib.Path) -> Any:
     """
     The sorting key used throughout the program. Depending on the CONFIG.sort_by_size parameter, the key is a string
     representing the path name, or a tuple of an integer containing the negative size of the path and the name key in
