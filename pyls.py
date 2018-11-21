@@ -60,8 +60,6 @@ def main():
         "0 if OK,
         1 if minor problems (e.g., cannot access subdirectory),
         2 if serious trouble (e.g., cannot access command-line argument)."
-
-    :return:
     """
     global CONFIG
     CONFIG = get_configuration_from_command_line_args()
@@ -240,7 +238,7 @@ def _iter_single_dir(path: pathlib.Path) -> Iterable[pathlib.Path]:
             yield path
             yield path / ".."
     for p in sorted(children, key=sort_key):
-        if not CONFIG.show_all and p.name[0] == '.':
+        if _is_hidden_path(p):
             continue
         yield p
 
@@ -249,10 +247,19 @@ def _populate_stack_for_recursive_execution(base_path: pathlib.Path,
                                             stack: List[pathlib.Path]):
     if base_path.is_symlink():
         return  # don't enter symlinks
+    if _is_hidden_path(base_path):
+        return
     children = sorted(base_path.iterdir(), key=sort_key, reverse=True)
     for c in children:
+        if _is_hidden_path(c):
+            continue
         if c.is_dir() and not c.is_symlink():
             stack.append(c)
+
+
+def _is_hidden_path(p: pathlib.Path) -> bool:
+    """ Determine if a path should be included in the pyls output. """
+    return not CONFIG.show_all and p.name.startswith(".")
 
 
 def sort_key(path: pathlib.Path) -> Any:

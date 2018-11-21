@@ -22,7 +22,6 @@ PATHS = dict(
     ),
     symlink_to_nested_subdir=dict(
         dirs=[
-            "foo",
             "foo/bar",
         ],
         symlinks=[("link", "foo/bar")],
@@ -33,6 +32,16 @@ PATHS = dict(
             "foo/bar2",
         ],
         symlinks=[("foo/bar1/link", "foo/bar2")],
+    ),
+    one_hidden_one_visible_dir=dict(
+        dirs=[
+            ".foo",
+            "bar",
+        ],
+        files=[
+            (".foo/a", 0),
+            ("bar/a", 0),
+        ],
     ),
     one_hidden_one_visible_file=dict(
         # the leading dot should be ignored in the alphabetical ordering.
@@ -64,24 +73,20 @@ PATHS = dict(
         ],
     ),
     filenames_with_whitespace=dict(
-        files=[("important document.txt", 1)],
+        files=[("important document", 0),
+               (" important document", 0),
+               ("important\tdocument", 0)],
     ),
-    two_empty_dirs=dict(
-        dirs=[
-            "foo",
-            "bar",
-        ],
-    ),
+    two_empty_dirs=dict(dirs=["foo", "bar"]),
     many_files=dict(
         files=[(f"{i:02d}.txt", i) for i in range(13)],
     ),
     many_files_long_name=dict(
-        files=[(f"abcdefghijklmnopqrstuvwxyz_{i:02d}.txt", i) for i in range(13)],
+        files=[(f"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz_{i:02d}.txt", i)
+               for i in range(13)],
     ),
     multiple_files_in_nested_directories=dict(
         dirs=[
-            "foo01",
-            "foo02",
             "foo01/bar01",
             "foo01/bar02",
             "foo02/bar01",
@@ -104,8 +109,7 @@ PATHS = dict(
     ),
     file_names_starting_with_symbols=dict(
         files=[
-            # the correct order for these seems to be:
-            #   1. File names with alphanumeric characters are sorted as though the alphanumerics
+            ("%&\"\'a", 0),
             ("a1", 0),
             ("_a2", 0),
             ("a_2", 0),
