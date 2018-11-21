@@ -7,6 +7,7 @@ import pathlib
 import pwd
 import stat
 import sys
+import shutil
 from typing import List, Iterable, Tuple, Any
 
 """ 
@@ -28,6 +29,7 @@ class Config:
     show_all: bool = False
     sort_by_size: bool = False
     recursive: bool = False
+    use_column_layout: bool = False
     paths: List[str] = dataclasses.field(default_factory=lambda: ["."])
 
 
@@ -45,6 +47,7 @@ def main():
     """
     global CONFIG
     CONFIG = get_configuration_from_command_line_args()
+    CONFIG.use_column_layout = True
     try:
         for line in ls_lines():
             print(line)
@@ -117,32 +120,19 @@ def format_lines_single_dir(base_path: pathlib.Path) -> Iterable[str]:
     Format the lines for the output based on the provided pathlib.Path instances. This does not include the path
     headers ("/some/path:") in recursive mode or when executing pyls with multiple path arguments.
     """
-    paths = _iter_single_dir_children(base_path)
+    paths = list(_iter_single_dir_children(base_path))
     if CONFIG.list_format:
-        paths = list(paths)  # need to iterate twice to calculate block count & format the output
-        yield f"total {_total_num_blocks(paths)}"
-        yield from _lines_of_single_dir_content_in_list_format(base_path, paths)
+        yield from _lines_of_single_dir_in_list_format(base_path, paths)
     else:
-        for p in paths:
-            yield _printable_path_name(base_path, p)
+        yield from _lines_of_single_dir_content_in_short_format(base_path, paths)
 
 
-def _total_num_blocks(paths: List[pathlib.Path]) -> int:
-    """ Calculates the total number of blocks allocated for the paths. """
-    blocks = 0
-    for p in paths:
-        blocks += p.lstat().st_blocks
-    # Divide by two, since st_blocks assumes blocksize of 512, while ls uses 1024:
-    # https://docs.python.org/3/library/os.html#os.stat_result.st_blocks
-    # https://unix.stackexchange.com/questions/28780/file-block-size-difference-between-stat-and-ls
-    return blocks // 2
-
-
-def _lines_of_single_dir_content_in_list_format(base_path: pathlib.Path,
-                                                paths: List[pathlib.Path]) -> Iterable[str]:
+def _lines_of_single_dir_in_list_format(base_path: pathlib.Path,
+                                        paths: List[pathlib.Path]) -> Iterable[str]:
     """
     Iterate over the formatted rows corresponding to the contents of a single directory in long list format.
     """
+    yield f"total {_total_num_blocks(paths)}"
     rows = [_single_row_data_in_list_format(base_path, p) for p in paths]
 
     col_widths = None
@@ -168,6 +158,17 @@ def _lines_of_single_dir_content_in_list_format(base_path: pathlib.Path,
         yield " ".join(align(val, col_width) for (val, col_width, align) in zip(row, col_widths, alignments))
 
 
+def _total_num_blocks(paths: List[pathlib.Path]) -> int:
+    """ Calculates the total number of blocks allocated for the paths. """
+    blocks = 0
+    for p in paths:
+        blocks += p.lstat().st_blocks
+    # Divide by two, since st_blocks assumes blocksize of 512, while ls uses 1024:
+    # https://docs.python.org/3/library/os.html#os.stat_result.st_blocks
+    # https://unix.stackexchange.com/questions/28780/file-block-size-difference-between-stat-and-ls
+    return blocks // 2
+
+
 def _single_row_data_in_list_format(base_path: pathlib.Path,
                                     p: pathlib.Path) -> Tuple[str, str, str, str, str, str, str]:
     """ Collect all items required to print a row in the long list format to a single tuple. """
@@ -189,6 +190,82 @@ def _single_row_data_in_list_format(base_path: pathlib.Path,
         name = f"{name} -> {p.resolve()}"
 
     return filemode, num_links_dirs, user, group, size_bytes, last_modified, name
+
+
+def _lines_of_single_dir_content_in_short_format(base_path: pathlib.Path,
+                                                 paths: List[pathlib.Path]) -> Iterable[str]:
+    """
+    This function defines the layout of results in the pyls execution without arguments. The algorithm which arranges
+    results in columns was ported from the original ls source code.
+    """
+    path_strings = [_printable_path_name(base_path, p) for p in paths]
+    if not CONFIG.use_column_layout:
+        yield from path_strings  # yield one path name per line
+    else:
+        yield from _lines_in_short_format_many_per_line(path_strings)
+
+
+@dataclasses.dataclass
+class ColumnInfo:
+    num_cols: int
+    col_array: List[int]
+    line_len: int = 0
+    is_valid: bool = True
+
+
+def _lines_in_short_format_many_per_line(path_strings: List[str]) -> Iterable[str]:
+    """
+    This function arranges the output of the pyls command into columns.
+
+    It is a direct port of the original print_many_per_line function in the coreutiles ls source code,
+    available at https://www.gnu.org/software/coreutils/, version 5.0, file src/ls.c lines 3485 - 3562.
+    """
+
+    terminal_size = shutil.get_terminal_size()
+    layout = _get_optimal_column_layout(path_strings, terminal_size)
+    num_files = len(path_strings)
+    # there are num_files / num_cols many rows, plus maybe one that is not entirely filled
+    num_rows = num_files // layout.num_cols + int(num_files % layout.num_cols != 0)
+    for row_idx in range(num_rows):
+        col_idx = 0
+        file_index = row_idx
+        row_names = []
+        while True:
+            max_name_length_in_col = layout.col_array[col_idx]
+            row_names.append(path_strings[file_index].ljust(max_name_length_in_col))
+            col_idx += 1
+            file_index += num_rows
+            if file_index >= num_files:
+                break
+        yield "".join(row_names)
+
+
+def _get_optimal_column_layout(path_strings, terminal_size) -> ColumnInfo:
+    """
+    This function determines the optimal number of columns for the output of the pyls command.
+
+    It is a direct port of the original print_many_per_line function in the coreutiles ls source code,
+    available at https://www.gnu.org/software/coreutils/, version 5.0, file src/ls.c lines 3485 - 3562.
+    """
+
+    max_possible_cols = max(1, terminal_size.columns // 3)
+    col_layouts = [ColumnInfo(num_cols=i, col_array=[0] * i) for i in range(1, max_possible_cols)]
+    for p_idx, p in enumerate(path_strings):
+        real_length = len(p) + 2  # (2 if p_idx != 0 else 0)
+        for col, col_layout in enumerate(col_layouts, 1):
+            if not col_layout.is_valid:
+                continue
+            idx = p_idx // ((len(path_strings) + col - 1) // (col))
+            if real_length > col_layout.col_array[idx]:
+                col_layout.line_len += real_length - col_layout.col_array[idx]
+                col_layout.col_array[idx] = real_length
+                col_layout.is_valid = col_layout.line_len < terminal_size.columns
+    valid_col = col_layouts[-1]
+    for c in reversed(col_layouts):
+        if c.is_valid:
+            valid_col = c
+            break
+    return valid_col
 
 
 def _printable_path_name(base_path: pathlib.Path, p: pathlib.Path) -> str:
@@ -213,7 +290,7 @@ def _last_modified_time_str(lstat) -> str:
     For files older than 6 months, a different date format indicating the day, month and year is used.
     """
     last_modified = datetime.datetime.fromtimestamp(lstat.st_mtime)
-    # The constant 31556952 is used in the ls source code, available at http://ftp.gnu.org/gnu/coreutils/.
+    # The constant 31556952 is used in the ls source code, available at https://www.gnu.org/software/coreutils/.
     # It roughly represents the number of seconds in a Gregorian year.
     six_months_in_seconds = 31556952 // 2
     if (datetime.datetime.now() - last_modified) < datetime.timedelta(seconds=six_months_in_seconds):
@@ -263,7 +340,7 @@ def _populate_stack_for_recursive_execution(base_path: pathlib.Path,
 
 
 def _is_hidden_path(p: pathlib.Path) -> bool:
-    """ Determine if a path should be included in the pyls output. """
+    """ Determine if the path should be excluded from the pyls output. """
     return not CONFIG.show_all and p.name.startswith(".")
 
 
