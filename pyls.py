@@ -47,7 +47,6 @@ def main():
     """
     global CONFIG
     CONFIG = get_configuration_from_command_line_args()
-    CONFIG.use_column_layout = True
     try:
         for line in ls_lines():
             print(line)
@@ -69,12 +68,17 @@ def get_configuration_from_command_line_args() -> Config:
     parser.add_argument('-S', action='store_true')
     parser.add_argument('-R', action='store_true')
     args = parser.parse_args()
+
+    # only format output in columns if pyls command is run directly from a terminal
+    use_column_layout = sys.stdout.isatty()
+
     return Config(
         list_format=args.l,
         show_all=args.a,
         sort_by_size=args.S,
         recursive=args.R,
         paths=args.paths,
+        use_column_layout=use_column_layout,
     )
 
 
