@@ -92,7 +92,7 @@ The following examples show the output of pyls when run in the pyls source direc
 
 ## Tests
 
-The repository includes many tests comparing pyls to the output of the system ls command. To run the tests, first install the development dependencies with `pip install -r dev-requirements.txt`. The tests can then be executed by running the command `pytest test`, which should result in output similar to:
+The repository includes many tests comparing pyls to the output of the system ls command. To run the tests, first install the development dependencies with `pip install -r dev-requirements.txt`. The tests can then be executed by running the `pytest` command, which should result in output similar to:
 
 
     ============================= test session starts ==============================
