@@ -79,11 +79,11 @@ PATHS = dict(
     ),
     two_empty_dirs=dict(dirs=["foo", "bar"]),
     many_files=dict(
-        files=[(f"{i:02d}.txt", i) for i in range(13)],
+        files=[(f"{i:02d}.txt", i) for i in range(10)],
     ),
     many_files_long_name=dict(
         files=[(f"abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz_{i:02d}.txt", i)
-               for i in range(13)],
+               for i in range(10)],
     ),
     multiple_files_in_nested_directories=dict(
         dirs=[
@@ -119,6 +119,7 @@ PATHS = dict(
             ("a_3", 0),
             ("__a4", 0),
             # repeat with dot prefix to check that they are sorted correctly with the -a option
+            (".%&\"\'a", 0),
             (".a1", 0),
             ("._a2", 0),
             (".......", 0),

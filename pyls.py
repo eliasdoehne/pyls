@@ -83,7 +83,7 @@ def get_configuration_from_command_line_args() -> Config:
 
 
 def ls_string() -> str:
-    """ Collect the pyls output to a single string. Mostly used for testing. """
+    """ Collect the pyls output in a single string. Mostly used for testing. """
     joined_lines = "\n".join(ls_lines())
     if joined_lines:  # only add trailing newline to non-empty output
         joined_lines += "\n"
@@ -101,7 +101,7 @@ def ls_lines() -> Iterable[str]:
     stack = sorted((pathlib.Path(p) for p in CONFIG.paths),
                    key=_sort_key, reverse=True)
     while stack:
-        base_path = stack.pop()
+        base_dir = stack.pop()
 
         """ In recursive mode or if multiple path arguments are given, we first print a header indicating the current 
         directory. This header should have a leading newline, unless it is the first line of the output. Since this 
@@ -110,39 +110,34 @@ def ls_lines() -> Iterable[str]:
 
         if list_multiple_dirs:
             newline = "" if is_first_dir else "\n"
-            yield f"{newline}{base_path}:"
+            yield f"{newline}{base_dir}:"
             is_first_dir = False
 
-        yield from format_lines_single_dir(base_path)
+        yield from _formatted_lines_single_dir(base_dir)
 
         if CONFIG.recursive:
-            _populate_stack_for_recursive_execution(base_path, stack)
+            _populate_stack_for_recursive_execution(base_dir, stack)
 
 
-def format_lines_single_dir(base_path: pathlib.Path) -> Iterable[str]:
+def _formatted_lines_single_dir(base_dir: pathlib.Path) -> Iterable[str]:
     """
-    Format the lines for the output based on the provided pathlib.Path instances. This does not include the path
+    Format the lines for the contents of the base_dir properly formatted. This does not include the path
     headers ("/some/path:") in recursive mode or when executing pyls with multiple path arguments.
     """
-    paths = list(_iter_single_dir_children(base_path))
+    paths = list(_iter_single_dir_children(base_dir))
     if CONFIG.list_format:
-        yield from _lines_of_single_dir_in_list_format(base_path, paths)
+        yield from _lines_of_single_dir_in_list_format(base_dir, paths)
     else:
-        yield from _lines_of_single_dir_content_in_short_format(base_path, paths)
+        yield from _lines_of_single_dir_in_short_format(base_dir, paths)
 
 
-def _lines_of_single_dir_in_list_format(base_path: pathlib.Path,
+def _lines_of_single_dir_in_list_format(base_dir: pathlib.Path,
                                         paths: List[pathlib.Path]) -> Iterable[str]:
     """
     Iterate over the formatted rows corresponding to the contents of a single directory in long list format.
     """
     yield f"total {_total_num_blocks(paths)}"
-    rows = [_single_row_data_in_list_format(base_path, p) for p in paths]
-
-    col_widths = None
-    if rows:
-        col_widths = [max(len(r[col_idx]) for r in rows) for col_idx in range(6)]
-        col_widths.append(0)
+    rows = [_single_row_data_in_list_format(base_dir, p) for p in paths]
 
     left_align = lambda s, w: s.ljust(w)
     right_align = lambda s, w: s.rjust(w)
@@ -157,6 +152,10 @@ def _lines_of_single_dir_in_list_format(base_path: pathlib.Path,
         left_align,  # last modified
         no_align,  # name
     ]
+
+    col_widths = None
+    if rows:
+        col_widths = [max(len(r[col_idx]) for r in rows) for col_idx in range(len(alignments))]
 
     for row in rows:
         yield " ".join(align(val, col_width) for (val, col_width, align) in zip(row, col_widths, alignments))
@@ -173,7 +172,7 @@ def _total_num_blocks(paths: List[pathlib.Path]) -> int:
     return blocks // 2
 
 
-def _single_row_data_in_list_format(base_path: pathlib.Path,
+def _single_row_data_in_list_format(base_dir: pathlib.Path,
                                     p: pathlib.Path) -> Tuple[str, str, str, str, str, str, str]:
     """ Collect all items required to print a row in the long list format to a single tuple. """
     lstat = p.lstat()
@@ -188,7 +187,7 @@ def _single_row_data_in_list_format(base_path: pathlib.Path,
 
     size_bytes = str(lstat.st_size)
     last_modified = _last_modified_time_str(lstat)
-    name = _printable_path_name(base_path, p)
+    name = _printable_path_name(base_dir, p)
 
     if p.is_symlink():
         name = f"{name} -> {p.resolve()}"
@@ -196,13 +195,13 @@ def _single_row_data_in_list_format(base_path: pathlib.Path,
     return filemode, num_links_dirs, user, group, size_bytes, last_modified, name
 
 
-def _lines_of_single_dir_content_in_short_format(base_path: pathlib.Path,
-                                                 paths: List[pathlib.Path]) -> Iterable[str]:
+def _lines_of_single_dir_in_short_format(base_dir: pathlib.Path,
+                                         paths: List[pathlib.Path]) -> Iterable[str]:
     """
     This function defines the layout of results in the pyls execution without arguments. The algorithm which arranges
     results in columns was ported from the original ls source code.
     """
-    path_strings = [_printable_path_name(base_path, p) for p in paths]
+    path_strings = [_printable_path_name(base_dir, p) for p in paths]
     if not CONFIG.use_column_layout:
         yield from path_strings  # yield one path name per line
     else:
@@ -219,16 +218,15 @@ class ColumnInfo:
 
 def _lines_in_short_format_many_per_line(path_strings: List[str]) -> Iterable[str]:
     """
-    This function arranges the output of the pyls command into columns.
+    This function arranges the short-format output of the pyls command into columns.
 
-    It is a direct port of the original print_many_per_line function in the coreutiles ls source code,
+    It is a direct port of the original print_many_per_line function in the coreutils ls source code,
     available at https://www.gnu.org/software/coreutils/, version 5.0, file src/ls.c lines 3485 - 3562.
     """
-
     terminal_size = shutil.get_terminal_size()
     layout = _get_optimal_column_layout(path_strings, terminal_size)
     num_files = len(path_strings)
-    # there are num_files / num_cols many rows, plus maybe one that is not entirely filled
+    # there are num_files // num_cols many rows, plus maybe one that is not entirely filled
     num_rows = num_files // layout.num_cols + int(num_files % layout.num_cols != 0)
     for row_idx in range(num_rows):
         col_idx = 0
@@ -248,10 +246,9 @@ def _get_optimal_column_layout(path_strings, terminal_size) -> ColumnInfo:
     """
     This function determines the optimal number of columns for the output of the pyls command.
 
-    It is a direct port of the original print_many_per_line function in the coreutiles ls source code,
+    It is a direct port of the original print_many_per_line function in the coreutils ls source code,
     available at https://www.gnu.org/software/coreutils/, version 5.0, file src/ls.c lines 3485 - 3562.
     """
-
     max_possible_cols = max(1, terminal_size.columns // 3)
     col_layouts = [ColumnInfo(num_cols=i, col_array=[0] * i) for i in range(1, max_possible_cols)]
     for p_idx, p in enumerate(path_strings):
@@ -272,16 +269,16 @@ def _get_optimal_column_layout(path_strings, terminal_size) -> ColumnInfo:
     return valid_col
 
 
-def _printable_path_name(base_path: pathlib.Path, p: pathlib.Path) -> str:
+def _printable_path_name(base_dir: pathlib.Path, p: pathlib.Path) -> str:
     """
-    Converts the path object to the name that should be shown in the ls output. The base_path is required to check
+    Converts the path object to the name that should be shown in the ls output. The base_dir is required to check
     for the special directories . and ..
     """
     name = p.name
     # The main reason for this function is the formatting of the . and .. dirs:
-    if p == base_path:
+    if p == base_dir:
         name = "."
-    elif p == base_path.parent:
+    elif p == base_dir.parent:
         name = ".."
     return name
 
@@ -329,17 +326,15 @@ def _iter_single_dir_children(path: pathlib.Path) -> Iterable[pathlib.Path]:
         yield p
 
 
-def _populate_stack_for_recursive_execution(base_path: pathlib.Path,
+def _populate_stack_for_recursive_execution(base_dir: pathlib.Path,
                                             stack: List[pathlib.Path]):
-    if base_path.is_symlink():
+    if base_dir.is_symlink():
         return  # don't enter symlinks
-    if _is_hidden_path(base_path):
+    if _is_hidden_path(base_dir):
         return
-    children = sorted(base_path.iterdir(), key=_sort_key, reverse=True)
+    children = sorted(base_dir.iterdir(), key=_sort_key, reverse=True)
     for c in children:
-        if _is_hidden_path(c):
-            continue
-        if c.is_dir() and not c.is_symlink():
+        if c.is_dir() and not c.is_symlink() and not _is_hidden_path(c):
             stack.append(c)
 
 
@@ -354,13 +349,14 @@ def _sort_key(path: pathlib.Path) -> Any:
     representing the path name, or a tuple of an integer containing the negative size of the path and the name key in
     order to resolve ties.
     """
+    path_name_key = locale.strxfrm(str(path))
     if CONFIG.sort_by_size:
         # use the negative size, as largest files should be printed first
         # make a tuple with the name key as the second element to resolve ties.
         return (-path.lstat().st_size,
-                locale.strxfrm(str(path)))
+                path_name_key)
     else:
-        return locale.strxfrm(str(path))
+        return path_name_key
 
 
 if __name__ == '__main__':

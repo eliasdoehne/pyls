@@ -26,7 +26,6 @@ def setup_test_dirs(tmp_path_factory) -> pathlib.Path:
     /tmp/pytest-of-elias/pytest-10/pyls_test_dir-0/empty
 
     :param tmp_path_factory: used to make a temporary base directory, see https://docs.pytest.org/en/latest/tmpdir.html
-    :return:
     """
     base_path = tmp_path_factory.mktemp("pyls_test_dir_")
 
@@ -95,23 +94,27 @@ def run_pyls(path, list_format=False, recursive=False, show_all=False, sort_by_s
 @pytest.mark.parametrize("sort_by_size", [False, True])
 @pytest.mark.parametrize("recursive", [False, True])
 @pytest.mark.parametrize("list_format", [False, True])
-@pytest.mark.parametrize("test_case", list(PATHS.keys()))
+@pytest.mark.parametrize("test_case", PATHS)
 def test_compare_to_system_ls(test_base_dir: pathlib.Path,
                               test_case: str,
+                              relative_path: bool,
                               sort_by_size: bool,
                               show_all: bool,
-                              relative_path: bool,
                               recursive: bool,
                               list_format: bool):
     """
     Test the pyls implementation against the output of the system ls command.
 
+    Based on the PATHS dictionary defined in test_data.py, the pytest fixture test_base_dir, defined above,
+    creates a directory structure and some (small) test files in a temporary directory. The tests run the system
+    ls command via subprocess.run, as well as the pyls implementation with all combinations of supported parameters.
+    The result of pyls is compared against the captured stdout of the ls subprocess.
 
     :param test_base_dir: fixture for a base directory, defined above in setup_test_dirs
-    :param test_case: Identifier of the test case, i.e. its key in the PATHS dictionary.
+    :param test_case: Identifier of the test case, i.e. a key in the PATHS dictionary.
+    :param relative_path: Change the working directory and use a relative path to invoke the ls commands
     :param sort_by_size: Use the -S option
     :param show_all: Use the -a option
-    :param relative_path: Change the working directory and use a relative path to invoke the ls command
     :param recursive: Use the -R option
     :param list_format: Use the -l option
     """
